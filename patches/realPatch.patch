@@ -1,0 +1,328 @@
+diff --git a/api/video/video_timing.cc b/api/video/video_timing.cc
+index a5b7f78dc9..a9f7bd4a92 100644
+--- a/api/video/video_timing.cc
++++ b/api/video/video_timing.cc
+@@ -102,23 +102,13 @@ std::string TimingFrameInfo::ToString() const {
+   return sb.str();
+ }
+ 
+-VideoPlayoutDelay::VideoPlayoutDelay(TimeDelta min, TimeDelta max)
+-    : min_(std::clamp(min, TimeDelta::Zero(), kMax)),
+-      max_(std::clamp(max, min_, kMax)) {
+-  if (!(TimeDelta::Zero() <= min && min <= max && max <= kMax)) {
+-    RTC_LOG(LS_ERROR) << "Invalid video playout delay: [" << min << "," << max
+-                      << "]. Clamped to [" << this->min() << "," << this->max()
+-                      << "]";
+-  }
+-}
++VideoPlayoutDelay::VideoPlayoutDelay(TimeDelta, TimeDelta)
++    : min_(TimeDelta::Zero()), max_(TimeDelta::Zero()) {}
+ 
+-bool VideoPlayoutDelay::Set(TimeDelta min, TimeDelta max) {
+-  if (TimeDelta::Zero() <= min && min <= max && max <= kMax) {
+-    min_ = min;
+-    max_ = max;
+-    return true;
+-  }
+-  return false;
++bool VideoPlayoutDelay::Set(TimeDelta, TimeDelta) {
++  min_ = TimeDelta::Zero();
++  max_ = TimeDelta::Zero();
++  return true;
+ }
+ 
+ }  // namespace webrtc
+diff --git a/api/video/video_timing.h b/api/video/video_timing.h
+index 0a450cddaa..c8cec5e36d 100644
+--- a/api/video/video_timing.h
++++ b/api/video/video_timing.h
+@@ -142,7 +142,7 @@ class RTC_EXPORT VideoPlayoutDelay {
+ 
+  private:
+   TimeDelta min_ = TimeDelta::Zero();
+-  TimeDelta max_ = kMax;
++  TimeDelta max_ = TimeDelta::Zero();
+ };
+ 
+ }  // namespace webrtc
+diff --git a/modules/video_coding/timing/timing.cc b/modules/video_coding/timing/timing.cc
+index 9485dedebb..e097fbf81a 100644
+--- a/modules/video_coding/timing/timing.cc
++++ b/modules/video_coding/timing/timing.cc
+@@ -33,8 +33,6 @@ namespace {
+ 
+ // Default pacing that is used for the low-latency renderer path.
+ constexpr TimeDelta kZeroPlayoutDelayDefaultMinPacing = TimeDelta::Millis(8);
+-constexpr TimeDelta kLowLatencyStreamMaxPlayoutDelayThreshold =
+-    TimeDelta::Millis(500);
+ 
+ void CheckDelaysValid(TimeDelta min_delay, TimeDelta max_delay) {
+   if (min_delay > max_delay) {
+@@ -110,16 +108,7 @@ void VCMTiming::set_playout_delay(const VideoPlayoutDelay& playout_delay) {
+   max_playout_delay_ = playout_delay.max();
+ }
+ 
+-void VCMTiming::SetJitterDelay(TimeDelta jitter_delay) {
+-  MutexLock lock(&mutex_);
+-  if (jitter_delay != jitter_delay_) {
+-    jitter_delay_ = jitter_delay;
+-    // When in initial state, set current delay to minimum delay.
+-    if (current_delay_.IsZero()) {
+-      current_delay_ = jitter_delay_;
+-    }
+-  }
+-}
++void VCMTiming::SetJitterDelay(TimeDelta) {}
+ 
+ void VCMTiming::UpdateCurrentDelay(uint32_t frame_timestamp) {
+   MutexLock lock(&mutex_);
+@@ -280,12 +269,7 @@ VideoFrame::RenderParameters VCMTiming::RenderParameters() const {
+ }
+ 
+ bool VCMTiming::UseLowLatencyRendering() const {
+-  // min_playout_delay_==0,
+-  // max_playout_delay_<=kLowLatencyStreamMaxPlayoutDelayThreshold indicates
+-  // that the low-latency path should be used, which means that frames should be
+-  // decoded and rendered as soon as possible.
+-  return min_playout_delay_.IsZero() &&
+-         max_playout_delay_ <= kLowLatencyStreamMaxPlayoutDelayThreshold;
++  return true;
+ }
+ 
+ VCMTiming::VideoDelayTimings VCMTiming::GetTimings() const {
+diff --git a/sdk/android/api/org/webrtc/EncodedImage.java b/sdk/android/api/org/webrtc/EncodedImage.java
+index 849a602487..87c5c97659 100644
+--- a/sdk/android/api/org/webrtc/EncodedImage.java
++++ b/sdk/android/api/org/webrtc/EncodedImage.java
+@@ -52,6 +52,7 @@ public class EncodedImage implements RefCounted {
+   public final int encodedHeight;
+   public final long captureTimeMs; // Deprecated
+   public final long captureTimeNs;
++  public final long rtpTimestamp;
+   public final FrameType frameType;
+   public final int rotation;
+   public final @Nullable Integer qp;
+@@ -69,13 +70,14 @@ public class EncodedImage implements RefCounted {
+ 
+   @CalledByNative
+   private EncodedImage(ByteBuffer buffer, @Nullable Runnable releaseCallback, int encodedWidth,
+-      int encodedHeight, long captureTimeNs, FrameType frameType, int rotation,
++      int encodedHeight, long captureTimeNs, long rtpTimestamp, FrameType frameType, int rotation,
+       @Nullable Integer qp) {
+     this.buffer = buffer;
+     this.encodedWidth = encodedWidth;
+     this.encodedHeight = encodedHeight;
+     this.captureTimeMs = TimeUnit.NANOSECONDS.toMillis(captureTimeNs);
+     this.captureTimeNs = captureTimeNs;
++    this.rtpTimestamp = rtpTimestamp;
+     this.frameType = frameType;
+     this.rotation = rotation;
+     this.qp = qp;
+@@ -134,6 +136,7 @@ public class EncodedImage implements RefCounted {
+     private int encodedWidth;
+     private int encodedHeight;
+     private long captureTimeNs;
++    private long rtpTimestamp;
+     private EncodedImage.FrameType frameType;
+     private int rotation;
+     private @Nullable Integer qp;
+@@ -167,6 +170,11 @@ public class EncodedImage implements RefCounted {
+       return this;
+     }
+ 
++    public Builder setRtpTimestamp(long rtpTimestamp) {
++      this.rtpTimestamp = rtpTimestamp;
++      return this;
++    }
++
+     public Builder setFrameType(EncodedImage.FrameType frameType) {
+       this.frameType = frameType;
+       return this;
+@@ -184,7 +192,7 @@ public class EncodedImage implements RefCounted {
+ 
+     public EncodedImage createEncodedImage() {
+       return new EncodedImage(buffer, releaseCallback, encodedWidth, encodedHeight, captureTimeNs,
+-          frameType, rotation, qp);
++          rtpTimestamp, frameType, rotation, qp);
+     }
+   }
+ }
+diff --git a/sdk/android/src/jni/encoded_image.cc b/sdk/android/src/jni/encoded_image.cc
+index 7e21c04669..65b6b0e99f 100644
+--- a/sdk/android/src/jni/encoded_image.cc
++++ b/sdk/android/src/jni/encoded_image.cc
+@@ -76,7 +76,8 @@ ScopedJavaLocalRef<jobject> NativeToJavaEncodedImage(
+       /*releaseCallback=*/ScopedJavaGlobalRef<jobject>(nullptr),
+       static_cast<int>(image._encodedWidth),
+       static_cast<int>(image._encodedHeight),
+-      image.capture_time_ms_ * kNumNanosecsPerMillisec, frame_type,
++      image.capture_time_ms_ * kNumNanosecsPerMillisec,
++      static_cast<jlong>(image.RtpTimestamp()), frame_type,
+       static_cast<jint>(image.rotation_), qp);
+ }
+ 
+diff --git a/sdk/android/src/jni/video_decoder_wrapper.cc b/sdk/android/src/jni/video_decoder_wrapper.cc
+index 0bd53dda77..c03f6c1c60 100644
+--- a/sdk/android/src/jni/video_decoder_wrapper.cc
++++ b/sdk/android/src/jni/video_decoder_wrapper.cc
+@@ -44,9 +44,6 @@ namespace webrtc {
+ namespace jni {
+ 
+ namespace {
+-// RTP timestamps are 90 kHz.
+-const int64_t kNumRtpTicksPerMillisec = 90000 / kNumMillisecsPerSec;
+-
+ template <typename Dst, typename Src>
+ inline std::optional<Dst> cast_optional(const std::optional<Src>& value) {
+   return value ? std::optional<Dst>(dchecked_cast<Dst, Src>(*value))
+@@ -112,9 +109,7 @@ int32_t VideoDecoderWrapper::Decode(const EncodedImage& image_param,
+ 
+   // Make a mutable copy so we can modify the timestamp.
+   EncodedImage input_image(image_param);
+-  // We use RTP timestamp for capture time because capture_time_ms_ is always 0.
+-  input_image.capture_time_ms_ =
+-      input_image.RtpTimestamp() / kNumRtpTicksPerMillisec;
++  input_image.capture_time_ms_ = TimeMillis();
+ 
+   FrameExtraInfo frame_extra_info;
+   frame_extra_info.timestamp_ns =
+diff --git a/video/video_receive_stream2.h b/video/video_receive_stream2.h
+index 8122f6d39e..c7dfe2dbad 100644
+--- a/video/video_receive_stream2.h
++++ b/video/video_receive_stream2.h
+@@ -68,8 +68,8 @@ class RtpStreamReceiverControllerInterface;
+ class RtxReceiveStream;
+ class VCMTiming;
+ 
+-constexpr TimeDelta kMaxWaitForKeyFrame = TimeDelta::Millis(200);
+-constexpr TimeDelta kMaxWaitForFrame = TimeDelta::Seconds(3);
++constexpr TimeDelta kMaxWaitForKeyFrame = TimeDelta::Millis(150);
++constexpr TimeDelta kMaxWaitForFrame = TimeDelta::Seconds(200);
+ 
+ namespace internal {
+ 
+diff --git a/video/video_stream_buffer_controller.cc b/video/video_stream_buffer_controller.cc
+index ff778633c9..809b9579f4 100644
+--- a/video/video_stream_buffer_controller.cc
++++ b/video/video_stream_buffer_controller.cc
+@@ -35,7 +35,6 @@
+ #include "modules/video_coding/timing/jitter_estimator.h"
+ #include "modules/video_coding/timing/timing.h"
+ #include "rtc_base/checks.h"
+-#include "rtc_base/experiments/field_trial_parser.h"
+ #include "rtc_base/logging.h"
+ #include "video/frame_decode_scheduler.h"
+ #include "video/frame_decode_timing.h"
+@@ -46,13 +45,12 @@ namespace webrtc {
+ namespace {
+ 
+ // Max number of frames the buffer will hold.
+-constexpr size_t kMaxFramesBuffered = 800;
++constexpr size_t kMaxFramesBuffered = 800;  // Should be 240ms delay at max on 60fps.
+ // Max number of decoded frame info that will be saved.
+ constexpr int kMaxFramesHistory = 1 << 13;
+ 
+-// Default value for the maximum decode queue size that is used when the
+-// low-latency renderer is used.
+-constexpr size_t kZeroPlayoutDelayDefaultMaxDecodeQueueSize = 8;
++// Default value for the maximum decode queue size for low-latency rendering.
++constexpr size_t kZeroPlayoutDelayDefaultMaxDecodeQueueSize = 10;
+ 
+ struct FrameMetadata {
+   explicit FrameMetadata(const EncodedFrame& frame)
+@@ -118,18 +116,12 @@ VideoStreamBufferController::VideoStreamBufferController(
+           VideoReceiveStreamTimeoutTracker::Timeouts{
+               .max_wait_for_keyframe = max_wait_for_keyframe,
+               .max_wait_for_frame = max_wait_for_frame},
+-          absl::bind_front(&VideoStreamBufferController::OnTimeout, this)),
+-      zero_playout_delay_max_decode_queue_size_(
+-          "max_decode_queue_size",
+-          kZeroPlayoutDelayDefaultMaxDecodeQueueSize) {
++          absl::bind_front(&VideoStreamBufferController::OnTimeout, this)) {
+   RTC_DCHECK(stats_proxy_);
+   RTC_DCHECK(receiver_);
+   RTC_DCHECK(timing_);
+   RTC_DCHECK(clock_);
+   RTC_DCHECK(frame_decode_scheduler_);
+-
+-  ParseFieldTrial({&zero_playout_delay_max_decode_queue_size_},
+-                  field_trials.Lookup("WebRTC-ZeroPlayoutDelay"));
+ }
+ 
+ void VideoStreamBufferController::Stop() {
+@@ -364,29 +356,7 @@ void VideoStreamBufferController::UpdateTimingFrameInfo() {
+ 
+ bool VideoStreamBufferController::IsTooManyFramesQueued() const
+     RTC_RUN_ON(&worker_sequence_checker_) {
+-  return buffer_->CurrentSize() > zero_playout_delay_max_decode_queue_size_;
+-}
+-
+-void VideoStreamBufferController::ForceKeyFrameReleaseImmediately()
+-    RTC_RUN_ON(&worker_sequence_checker_) {
+-  RTC_DCHECK(keyframe_required_);
+-  // Iterate through the frame buffer until there is a complete keyframe and
+-  // release this right away.
+-  while (buffer_->DecodableTemporalUnitsInfo()) {
+-    auto next_frame = buffer_->ExtractNextDecodableTemporalUnit();
+-    if (next_frame.empty()) {
+-      RTC_DCHECK_NOTREACHED()
+-          << "Frame buffer should always return at least 1 frame.";
+-      continue;
+-    }
+-    // Found keyframe - decode right away.
+-    if (next_frame.front()->is_keyframe()) {
+-      auto render_time = timing_->RenderTime(next_frame.front()->RtpTimestamp(),
+-                                             clock_->CurrentTime());
+-      OnFrameReady(std::move(next_frame), render_time);
+-      return;
+-    }
+-  }
++  return buffer_->CurrentSize() > kZeroPlayoutDelayDefaultMaxDecodeQueueSize;
+ }
+ 
+ void VideoStreamBufferController::MaybeScheduleFrameForRelease()
+@@ -396,10 +366,6 @@ void VideoStreamBufferController::MaybeScheduleFrameForRelease()
+     return;
+   }
+ 
+-  if (keyframe_required_) {
+-    return ForceKeyFrameReleaseImmediately();
+-  }
+-
+   // If already scheduled then abort.
+   if (frame_decode_scheduler_->ScheduledRtpTimestamp() ==
+       decodable_tu_info->next_rtp_timestamp) {
+diff --git a/video/video_stream_buffer_controller.h b/video/video_stream_buffer_controller.h
+index 17227871cc..4a709b865c 100644
+--- a/video/video_stream_buffer_controller.h
++++ b/video/video_stream_buffer_controller.h
+@@ -31,7 +31,6 @@
+ #include "modules/video_coding/timing/inter_frame_delay_variation_calculator.h"
+ #include "modules/video_coding/timing/jitter_estimator.h"
+ #include "modules/video_coding/timing/timing.h"
+-#include "rtc_base/experiments/field_trial_parser.h"
+ #include "rtc_base/system/no_unique_address.h"
+ #include "rtc_base/thread_annotations.h"
+ #include "system_wrappers/include/clock.h"
+@@ -111,7 +110,6 @@ class VideoStreamBufferController {
+   void UpdateFrameBufferTimings(Timestamp min_receive_time, Timestamp now);
+   void UpdateTimingFrameInfo();
+   bool IsTooManyFramesQueued() const RTC_RUN_ON(&worker_sequence_checker_);
+-  void ForceKeyFrameReleaseImmediately() RTC_RUN_ON(&worker_sequence_checker_);
+   void MaybeScheduleFrameForRelease() RTC_RUN_ON(&worker_sequence_checker_);
+ 
+   RTC_NO_UNIQUE_ADDRESS SequenceChecker worker_sequence_checker_;
+@@ -144,13 +142,6 @@ class VideoStreamBufferController {
+   bool decoder_ready_for_new_frame_ RTC_GUARDED_BY(&worker_sequence_checker_) =
+       false;
+ 
+-  // Maximum number of frames in the decode queue to allow pacing. If the
+-  // queue grows beyond the max limit, pacing will be disabled and frames will
+-  // be pushed to the decoder as soon as possible. This only has an effect
+-  // when the low-latency rendering path is active, which is indicated by
+-  // the frame's render time == 0.
+-  FieldTrialParameter<unsigned> zero_playout_delay_max_decode_queue_size_;
+-
+   ScopedTaskSafety worker_safety_;
+ };
+ 
