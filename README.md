@@ -1,3 +1,40 @@
+# WebRTC Build Branch
+
+This build uses the WebRTC branch:
+
+```text
+branch-heads/7559
+```
+
+Verified commit:
+
+```text
+0733324d99 [M144-LTS][Pipewire] Fix mouse cursor data race.
+```
+
+Before building, verify the checkout:
+
+```bash
+cd webrtc/src
+git status
+git log -1 --oneline
+```
+
+Expected state:
+
+```text
+On branch branch-heads/7559
+nothing to commit, working tree clean
+0733324d99 [M144-LTS][Pipewire] Fix mouse cursor data race.
+```
+
+Sync sometimes failes so use that command if that is the case
+
+```bash
+cd /d/GIT/webrtc-build-docker
+MSYS_NO_PATHCONV=1 docker run -it -v "$(pwd -W)/webrtc:/webrtc" threema/webrtc-build-tools:latest bash -c "cd /webrtc && gclient sync -D --reset --force -j1"
+```
+
 # libwebrtc Build Script
 
 This is a Dockerfile to build libwebrtc for Android using the new GN based
@@ -13,12 +50,16 @@ the resulting build into your application.**
 For an initial local build:
 
     ./cli.sh build-tools
-    ./cli.sh fetch
+    ./cli.sh fetch branch-heads/7559
     ./cli.sh patch
     ./cli.sh build-all
 
-For subsequent builds after an update:
+For subsequent builds after an update, make sure `webrtc/src` is still on
+`branch-heads/7559`:
 
+    cd webrtc/src
+    git status
+    cd ../..
     ./cli.sh update
     ./cli.sh patch
     ./cli.sh build-all
@@ -26,7 +67,7 @@ For subsequent builds after an update:
 For a (somewhat) reproducible build, created from within a temporary Docker container:
 
     ./cli.sh build-tools
-    ./build-final.sh <revision>
+    ./build-final.sh branch-heads/7559
 
 ## Usage: cli.sh
 
@@ -40,9 +81,13 @@ base.
 Then, fetch the libwebrtc code into the `webrtc` directory. This will download
 ~24 GiB and may take a while.
 
-    ./cli.sh fetch
+    ./cli.sh fetch branch-heads/7559
 
-Optionally switch to a specific (release) branch:
+This fetches the source and checks out the build branch used by this repository:
+
+    branch-heads/7559
+
+Optionally switch to a different specific release branch:
 
     cd webrtc/src
     git checkout branch-heads/<revision>
@@ -57,8 +102,8 @@ such:
     ./cli.sh update
 
 This will work on any branch but obviously may not switch to the most recent
-code revision (e.g. if on a release branch). When in detached head state, this
-will automatically check out the HEAD of the main branch.
+code revision, for example if you are on a release branch. When in detached head
+state, this will automatically check out the HEAD of the main branch.
 
 If you just want to sync libwebrtc source against the current commit/branch
 you've checked out, run:
@@ -105,21 +150,33 @@ whole process being done from within a temporary, deterministic Docker
 container:
 
     ./cli.sh build-tools
-    ./build-final.sh <revision>
+    ./build-final.sh branch-heads/7559
 
-This guarantees the absence of a cache (because it always fetches fresh code),
-consistent permissions and filesystem paths (so that your username and workdir
-isn't included in the binary's debug info) and will ensure that you don't
-forget to apply patches (because it always applies all patches at
-`patches/*.patch`).
+This guarantees the absence of a cache because it always fetches fresh code,
+consistent permissions and filesystem paths so that your username and workdir
+isn't included in the binary's debug info, and will ensure that you don't
+forget to apply patches because it always applies all patches at
+`patches/*.patch`.
 
 ## Patches
 
-Patches should be created using `git diff` inside the webrtc/src directory and
-stored in the /patches directory to be applied automatically when running
+Patches should be created using `git diff` inside the `webrtc/src` directory and
+stored in the `patches` directory to be applied automatically when running
 `./cli.sh patch`.
 
     git diff > ../../patches/my-changes.patch
+
+When reviewing patches, be careful with line-ending-only changes. To inspect
+only non-whitespace changes, use:
+
+    git diff -w
+
+For line-ending noise specifically, this is often safer:
+
+    git diff --ignore-space-at-eol
+
+Do not rely only on `git diff -w` before committing, because it can hide
+meaningful whitespace changes in files where whitespace matters.
 
 ## Updating the libwebrtc revision
 
@@ -168,8 +225,8 @@ parent directory. Make the following modifications to it:
 Open `build.gradle` and change `webrtcVersion` and `libraryVersion` to something
 absurdly high, e.g. `1337.0.0`. Comment the `signing` section.
 
-Now, apply all patches at once and make a test build for Android (assuming an
-ARM device here):
+Now, apply all patches at once and make a test build for Android, assuming an
+ARM device here:
 
     cd ../../
     ./cli.sh patch
@@ -180,7 +237,7 @@ Apply the resulting library to the Android codebase in the following hacky way:
 
 - Open `build.gradle.kts` and add `mavenLocal()` to `allprojects.repositories`.
 - Open `gradle/libs.versions.toml` and change the `webrtcAndroid` version to
-  your chosen (absurdly high) version.
+  your chosen absurdly high version.
 
 Now, build the Android codebase and test the following things:
 
@@ -190,4 +247,6 @@ Now, build the Android codebase and test the following things:
 - Run the SDP test suite in Android Studio.
 
 If all looks good, clean up the mess you made in webrtc-android and the Android
-codebase and prepare a release with `./build-final.sh <revision>`.
+codebase and prepare a release with:
+
+    ./build-final.sh branch-heads/7559

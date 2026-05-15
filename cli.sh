@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 TARGETS="${WEBRTC_TARGETS:-arm arm64 x86 x64}"
-BUILD_ARGS="${WEBRTC_BUILD_ARGS:-symbol_level=1 debuggable_apks=false enable_libaom=false rtc_enable_protobuf=false rtc_include_dav1d_in_internal_decoder_factory=false}"
+BUILD_ARGS="${WEBRTC_BUILD_ARGS:-symbol_level=1 debuggable_apks=false enable_libaom=false rtc_enable_protobuf=false rtc_include_dav1d_in_internal_decoder_factory=false extra_ldflags=[\"-Wl,-z,max-page-size=16384\"]}"
 
 function print_usage {
     echo "Usage: $0 <command> [<args>]"
@@ -31,9 +31,11 @@ function build_target {
     target=$1
     build_args=${@:2}
 
-    docker run -it -v ${PWD}/webrtc:/webrtc threema/webrtc-build-tools:latest bash -c "
+    docker run -it -v "$(pwd -W)/webrtc:/webrtc" threema/webrtc-build-tools:latest bash -c "
         set -euo pipefail
         cd src
+        mkdir -p out/android-${target}/tmp
+        export TMPDIR=\"\$(pwd)/out/android-${target}/tmp\"
         gn gen out/android-${target} --args='cc_wrapper=\"ccache\" target_os=\"android\" target_cpu=\"${target}\" ${build_args}'
         source build/android/envsetup.sh
         autoninja -C out/android-${target} webrtc
@@ -90,7 +92,7 @@ case ${1-} in
         # Fetch sources
         mkdir webrtc
         revision=${2:-main}
-        docker run -it -v ${PWD}/webrtc:/webrtc threema/webrtc-build-tools:latest bash -c "
+        docker run -it -v "$(pwd -W)/webrtc:/webrtc" threema/webrtc-build-tools:latest bash -c "
             set -euo pipefail
             echo 'Fetching source files'
             fetch webrtc_android
@@ -113,7 +115,7 @@ case ${1-} in
         (cd webrtc/src && git stash push -u)
 
         # Update sources
-        docker run -it -v ${PWD}/webrtc:/webrtc threema/webrtc-build-tools:latest bash -c "
+        docker run -it -v "$(pwd -W)/webrtc:/webrtc" threema/webrtc-build-tools:latest bash -c "
             set -euo pipefail
             echo 'Updating source files and tracking branches'
             echo 'Note: This will leave all untracked branches untouched!'
@@ -133,7 +135,7 @@ case ${1-} in
         fi
 
         # Sync sources
-        docker run -it -v ${PWD}/webrtc:/webrtc threema/webrtc-build-tools:latest bash -c "
+        docker run -it -v "$(pwd -W)/webrtc:/webrtc" threema/webrtc-build-tools:latest bash -c "
             set -euo pipefail
             echo 'Syncing third party repos and running pre-compile hooks'
             gclient sync -D
@@ -177,7 +179,7 @@ case ${1-} in
         fi
 
         # Format
-        docker run -it -v ${PWD}/webrtc:/webrtc threema/webrtc-build-tools:latest bash -c "
+        docker run -it -v "$(pwd -W)/webrtc:/webrtc" threema/webrtc-build-tools:latest bash -c "
             set -euo pipefail
             cd src
             git cl format
@@ -226,7 +228,7 @@ case ${1-} in
         require_tools_image
         
         # Run an interactive shell
-        docker run -it -v ${PWD}/webrtc:/webrtc threema/webrtc-build-tools:latest
+        docker run -it -v "$(pwd -W)/webrtc:/webrtc" threema/webrtc-build-tools:latest
         ;;
 
     *)
